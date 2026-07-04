@@ -1,0 +1,59 @@
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #f4f6f8;
+  color: #1f2937;
+}
+
+.app {
+  min-height: 100vh;
+  padding: 40px;
+}
+
+.dashboard {
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.dashboard h1 {
+  margin-bottom: 8px;
+  font-size: 36px;
+}
+
+.dashboard p {
+  margin-bottom: 32px;
+  color: #4b5563;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+}
+
+.summary-card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 24px;
+}
+
+.summary-card span {
+  display: block;
+  margin-bottom: 12px;
+  color: #6b7280;
+}
+
+.summary-card strong {
+  font-size: 28px;
+}
+
+.error {
+  color: #b91c1c;
+}
+
+@media (max-width: 800px) {
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
