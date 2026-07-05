@@ -12,6 +12,7 @@ type Summary = {
 type Transaction = {
   id: string;
   categoryId: string;
+  categoryName: string;
   amount: number;
   type: string;
   transactionDate: string;
@@ -85,6 +86,7 @@ function App() {
             <div className="transactions-table">
               <div className="transactions-row transactions-header">
                 <span>Date</span>
+                <span>Category</span>
                 <span>Type</span>
                 <span>Amount</span>
                 <span>Notes</span>
@@ -93,6 +95,7 @@ function App() {
               {transactions.map((transaction) => (
                 <div className="transactions-row" key={transaction.id}>
                   <span>{transaction.transactionDate}</span>
+                  <span>{transaction.categoryName}</span>
                   <span>{transaction.type}</span>
                   <span>${transaction.amount}</span>
                   <span>{transaction.notes ?? "-"}</span>

@@ -131,6 +131,21 @@ app.MapPost("/api/transactions", async (
 app.MapGet("/api/transactions", async (AppDbContext dbContext) =>
 {
     var transactions = await dbContext.Transactions
+        .Join(
+            dbContext.Categories,
+            transaction => transaction.CategoryId,
+            category => category.Id,
+            (transaction, category) => new
+            {
+                transaction.Id,
+                transaction.CategoryId,
+                CategoryName = category.Name,
+                transaction.Amount,
+                transaction.Type,
+                transaction.TransactionDate,
+                transaction.Notes,
+                transaction.CreatedAtUtc
+            })
         .OrderByDescending(transaction => transaction.TransactionDate)
         .ToListAsync();
 
