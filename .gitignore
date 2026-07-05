@@ -16,3 +16,4 @@ dist/
 # Secrets
 secrets.json
 appsettings.Production.json
+*.docx
