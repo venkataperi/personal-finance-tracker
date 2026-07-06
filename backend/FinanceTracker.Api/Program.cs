@@ -2,6 +2,9 @@ using FinanceTracker.Api.Modules.Finance.Categories;
 using FinanceTracker.Api.Modules.Finance.Transactions;
 using FinanceTracker.Api.Shared.Database;
 using Microsoft.EntityFrameworkCore;
+using FinanceTracker.Api.Modules.Imports;
+using System.Globalization;
+using Microsoft.AspNetCore.Mvc;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -178,5 +181,155 @@ app.MapGet("/api/reports/summary", async (AppDbContext dbContext) =>
     });
 })
 .WithName("GetSummaryReport");
+
+app.MapPost("/api/imports/statement/preview", async (HttpRequest request) =>
+{
+    if (!request.HasFormContentType)
+    {
+        return Results.BadRequest("Expected multipart form data.");
+    }
+
+    var form = await request.ReadFormAsync();
+    var statementType = form["statementType"].ToString();
+    var file = form.Files["file"];
+
+
+    if (string.IsNullOrWhiteSpace(statementType))
+    {
+        return Results.BadRequest("Statement type is required.");
+    }
+
+    if (!Enum.TryParse<StatementType>(statementType, true, out var parsedStatementType))
+    {
+        return Results.BadRequest("Invalid statement type.");
+    }
+
+    if (file is null || file.Length == 0)
+    {
+        return Results.BadRequest("CSV file is required.");
+    }
+
+    var previewTransactions = new List<ImportPreviewTransaction>();
+
+    using var stream = file.OpenReadStream();
+    using var reader = new StreamReader(stream);
+
+    var headerLine = await reader.ReadLineAsync();
+
+    if (headerLine is null)
+    {
+        return Results.BadRequest("CSV file is empty.");
+    }
+
+     var delimiter = headerLine.Contains(';') ? ';' : ',';
+
+    while (!reader.EndOfStream)
+    {
+        var line = await reader.ReadLineAsync();
+
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            continue;
+        }
+
+    var columns = line.Split(delimiter);
+
+if (columns.Length < 6)
+{
+    continue;
+}
+
+if (!DateOnly.TryParse(columns[0].Trim().Trim('"'), out var transactionDate))
+{
+    continue;
+}
+
+var description = columns[2].Trim().Trim('"');
+var sourceCategory = columns[3].Trim().Trim('"');
+var debitText = columns[4].Trim().Trim('"').Replace("$", string.Empty);
+var creditText = columns[5].Trim().Trim('"').Replace("$", string.Empty);
+
+decimal.TryParse(
+    debitText,
+    NumberStyles.Number,
+    CultureInfo.InvariantCulture,
+    out var debitAmount);
+
+decimal.TryParse(
+    creditText,
+    NumberStyles.Number,
+    CultureInfo.InvariantCulture,
+    out var creditAmount);
+
+var rawAmount = debitAmount > 0 ? debitAmount : creditAmount;
+var isCreditAmount = creditAmount > 0;
+
+if (rawAmount <= 0)
+{
+    continue;
+}
+
+var transactionGroup = parsedStatementType == StatementType.CreditCard
+    ? isCreditAmount ? "PaymentOrRefund" : "Expense"
+    : "Unclassified";
+
+        //var appCategory = sourceCategory;
+
+        var descriptionLower = description.ToLowerInvariant();
+var sourceCategoryLower = sourceCategory.ToLowerInvariant();
+
+var appCategory =
+    sourceCategoryLower.Contains("credit card payment") ||
+    descriptionLower.Contains("payment received")
+        ? "Credit Card Payment"
+    : sourceCategoryLower.Contains("fees") ||
+      descriptionLower.Contains("interest")
+        ? "Fees / Interest"
+    : descriptionLower.Contains("costco") ||
+      descriptionLower.Contains("supermarket") ||
+      sourceCategoryLower.Contains("grocery")
+        ? "Groceries"
+    : sourceCategoryLower.Contains("restaurant")
+        ? "Restaurants / Coffee"
+    : sourceCategoryLower.Contains("car rental") ||
+      sourceCategoryLower.Contains("taxi") ||
+      descriptionLower.Contains("uber")
+        ? "Transportation"
+    : sourceCategoryLower.Contains("internet") ||
+      sourceCategoryLower.Contains("cable")
+        ? "Phone / Internet"
+    : sourceCategoryLower.Contains("electronics") ||
+      descriptionLower.Contains("openai")
+        ? "Software / Subscriptions"
+    : sourceCategoryLower.Contains("gift") ||
+      sourceCategoryLower.Contains("donation")
+        ? "Gifts / Donations"
+    : sourceCategoryLower.Contains("alcohol") ||
+      sourceCategoryLower.Contains("bar")
+        ? "Entertainment"
+    : sourceCategoryLower.Contains("insurance") ||
+      sourceCategoryLower.Contains("finance")
+        ? "Insurance / Financial"
+    : sourceCategoryLower.Contains("shopping")
+        ? "Shopping"
+    : "Miscellaneous";
+
+        previewTransactions.Add(new ImportPreviewTransaction
+        {
+            TransactionDate = transactionDate,
+            Description = description,
+            SourceCategory = sourceCategory,
+            RawAmount = rawAmount,
+            TransactionGroup = transactionGroup,
+            AppCategory = appCategory
+        });
+    }
+
+    return Results.Ok(previewTransactions);
+})
+
+.WithName("PreviewStatementImport")
+.DisableAntiforgery()
+.ExcludeFromDescription();
 
 app.Run();

@@ -112,3 +112,70 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+.form-section {
+  margin-top: 40px;
+  padding: 24px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  text-align: left;
+}
+
+.form-section h2 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.transaction-form {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr 1fr 2fr auto;
+  gap: 16px;
+  align-items: end;
+}
+
+.transaction-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #4b5563;
+  font-weight: 700;
+}
+
+.transaction-form input,
+.transaction-form select {
+  min-height: 42px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 16px;
+}
+
+.transaction-form button {
+  min-height: 44px;
+  border: none;
+  border-radius: 8px;
+  padding: 0 18px;
+  background: #2563eb;
+  color: white;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.transaction-form button:hover {
+  background: #1d4ed8;
+}
+
+.success {
+  color: #047857;
+  font-weight: 700;
+}
+
+@media (max-width: 1000px) {
+  .transaction-form {
+    grid-template-columns: 1fr;
+  }
+}
+

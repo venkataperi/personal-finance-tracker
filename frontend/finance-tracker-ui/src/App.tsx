@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { api } from "./services/api";
 import "./App.css";
 
@@ -7,6 +7,13 @@ type Summary = {
   totalExpenses: number;
   balance: number;
   transactionCount: number;
+};
+
+type Category = {
+  id: string;
+  name: string;
+  type: string;
+  createdAtUtc: string;
 };
 
 type Transaction = {
@@ -22,10 +29,17 @@ type Transaction = {
 
 function App() {
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [categoryId, setCategoryId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [type, setType] = useState("Expense");
+  const [transactionDate, setTransactionDate] = useState("2026-07-05");
+  const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
-  useEffect(() => {
+  const loadDashboard = () => {
     api
       .get<Summary>("/api/reports/summary")
       .then((response) => {
@@ -43,7 +57,57 @@ function App() {
       .catch(() => {
         setError("Unable to load transactions from API.");
       });
+
+    api
+      .get<Category[]>("/api/categories")
+      .then((response) => {
+        setCategories(response.data);
+
+        if (!categoryId && response.data.length > 0) {
+          setCategoryId(response.data[0].id);
+        }
+      })
+      .catch(() => {
+        setError("Unable to load categories from API.");
+      });
+  };
+
+  useEffect(() => {
+    loadDashboard();
   }, []);
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    setError("");
+    setSuccessMessage("");
+
+    if (!categoryId) {
+      setError("Please select a category.");
+      return;
+    }
+
+    if (!amount || Number(amount) <= 0) {
+      setError("Please enter an amount greater than zero.");
+      return;
+    }
+
+    try {
+      await api.post("/api/transactions", {
+        categoryId,
+        amount: Number(amount),
+        type,
+        transactionDate,
+        notes,
+      });
+
+      setAmount("");
+      setNotes("");
+      setSuccessMessage("Transaction added successfully.");
+      loadDashboard();
+    } catch {
+      setError("Unable to add transaction.");
+    }
+  };
 
   return (
     <main className="app">
@@ -52,6 +116,7 @@ function App() {
         <p>Track income, expenses, and balance from your .NET backend.</p>
 
         {error && <p className="error">{error}</p>}
+        {successMessage && <p className="success">{successMessage}</p>}
 
         {!summary && !error && <p>Loading dashboard...</p>}
 
@@ -78,6 +143,70 @@ function App() {
             </div>
           </div>
         )}
+
+        <section className="form-section">
+          <h2>Add Transaction</h2>
+
+          <form className="transaction-form" onSubmit={handleSubmit}>
+            <label>
+              Category
+              <select
+                value={categoryId}
+                onChange={(event) => setCategoryId(event.target.value)}
+              >
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Type
+              <select
+                value={type}
+                onChange={(event) => setType(event.target.value)}
+              >
+                <option value="Expense">Expense</option>
+                <option value="Income">Income</option>
+              </select>
+            </label>
+
+            <label>
+              Amount
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={amount}
+                onChange={(event) => setAmount(event.target.value)}
+                placeholder="Enter amount"
+              />
+            </label>
+
+            <label>
+              Date
+              <input
+                type="date"
+                value={transactionDate}
+                onChange={(event) => setTransactionDate(event.target.value)}
+              />
+            </label>
+
+            <label className="notes-field">
+              Notes
+              <input
+                type="text"
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                placeholder="Optional notes"
+              />
+            </label>
+
+            <button type="submit">Add Transaction</button>
+          </form>
+        </section>
 
         {transactions.length > 0 && (
           <section className="transactions-section">

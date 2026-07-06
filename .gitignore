@@ -17,3 +17,4 @@ dist/
 secrets.json
 appsettings.Production.json
 *.docx
+*.csv
