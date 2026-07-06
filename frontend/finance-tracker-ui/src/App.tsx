@@ -41,6 +41,15 @@ type ImportSummary = {
   categoryTotals: ImportCategoryTotal[];
 };
 
+type ImportPreviewTransaction = {
+  transactionDate: string;
+  description: string;
+  sourceCategory: string | null;
+  rawAmount: number;
+  transactionGroup: string;
+  appCategory: string;
+};
+
 function App() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -57,6 +66,8 @@ function App() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState("");
+
+  const [importPreview, setImportPreview] = useState<ImportPreviewTransaction[]>([]);
 
   const loadDashboard = () => {
     api
@@ -132,6 +143,7 @@ function App() {
     event.preventDefault();
     setImportError("");
     setImportSummary(null);
+    setImportPreview([]);
   
     if (!importFile) {
       setImportError("Please select a CSV file.");
@@ -143,7 +155,7 @@ function App() {
     formData.append("file", importFile);
   
     try {
-      const response = await api.post<ImportSummary>(
+      const summaryResponse = await api.post<ImportSummary>(
         "/api/imports/statement/summary",
         formData,
         {
@@ -153,7 +165,18 @@ function App() {
         }
       );
   
-      setImportSummary(response.data);
+      const previewResponse = await api.post<ImportPreviewTransaction[]>(
+        "/api/imports/statement/preview",
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        }
+      );
+  
+      setImportSummary(summaryResponse.data);
+      setImportPreview(previewResponse.data);
     } catch {
       setImportError("Unable to analyze statement.");
     }
@@ -298,6 +321,8 @@ function App() {
           <strong>${importSummary.totalExpenses}</strong>
         </div>
 
+        
+
         <div className="summary-card">
           <span>Payments / Refunds</span>
           <strong>${importSummary.totalPaymentsOrRefunds}</strong>
@@ -324,6 +349,34 @@ function App() {
           </div>
         ))}
       </div>
+
+      {importPreview.length > 0 && (
+  <>
+    <h3>Imported Transaction Preview</h3>
+
+    <div className="import-preview-table">
+      <div className="import-preview-row import-preview-header">
+        <span>Date</span>
+        <span>Description</span>
+        <span>Source Category</span>
+        <span>App Category</span>
+        <span>Group</span>
+        <span>Amount</span>
+      </div>
+
+      {importPreview.map((transaction, index) => (
+        <div className="import-preview-row" key={`${transaction.description}-${index}`}>
+          <span>{transaction.transactionDate}</span>
+          <span>{transaction.description}</span>
+          <span>{transaction.sourceCategory ?? "-"}</span>
+          <span>{transaction.appCategory}</span>
+          <span>{transaction.transactionGroup}</span>
+          <span>${transaction.rawAmount}</span>
+        </div>
+      ))}
+    </div>
+  </>
+)}  
     </div>
   )}
 </section>

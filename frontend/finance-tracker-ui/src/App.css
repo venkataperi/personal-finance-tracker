@@ -277,3 +277,34 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+.import-preview-table {
+  overflow: hidden;
+  margin-top: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.import-preview-row {
+  display: grid;
+  grid-template-columns: 1fr 1.8fr 1.5fr 1.5fr 1.2fr 1fr;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.import-preview-row:last-child {
+  border-bottom: none;
+}
+
+.import-preview-header {
+  background: #f9fafb;
+  color: #6b7280;
+  font-weight: 700;
+}
+
+@media (max-width: 1000px) {
+  .import-preview-row {
+    grid-template-columns: 1fr;
+  }
+}
