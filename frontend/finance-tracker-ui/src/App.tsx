@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
 import { api } from "./services/api";
 import "./App.css";
 
@@ -27,6 +28,19 @@ type Transaction = {
   createdAtUtc: string;
 };
 
+type ImportCategoryTotal = {
+  category: string;
+  total: number;
+};
+
+type ImportSummary = {
+  totalExpenses: number;
+  totalPaymentsOrRefunds: number;
+  netActivity: number;
+  transactionCount: number;
+  categoryTotals: ImportCategoryTotal[];
+};
+
 function App() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -38,6 +52,11 @@ function App() {
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+
+  const [importStatementType, setImportStatementType] = useState("CreditCard");
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
+  const [importError, setImportError] = useState("");
 
   const loadDashboard = () => {
     api
@@ -106,6 +125,37 @@ function App() {
       loadDashboard();
     } catch {
       setError("Unable to add transaction.");
+    }
+  };
+
+  const handleImportSummary = async (event: FormEvent) => {
+    event.preventDefault();
+    setImportError("");
+    setImportSummary(null);
+  
+    if (!importFile) {
+      setImportError("Please select a CSV file.");
+      return;
+    }
+  
+    const formData = new FormData();
+    formData.append("statementType", importStatementType);
+    formData.append("file", importFile);
+  
+    try {
+      const response = await api.post<ImportSummary>(
+        "/api/imports/statement/summary",
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        }
+      );
+  
+      setImportSummary(response.data);
+    } catch {
+      setImportError("Unable to analyze statement.");
     }
   };
 
@@ -207,6 +257,76 @@ function App() {
             <button type="submit">Add Transaction</button>
           </form>
         </section>
+
+        <section className="import-section">
+  <h2>Analyze Statement</h2>
+
+  <form className="import-form" onSubmit={handleImportSummary}>
+    <label>
+      Statement Type
+      <select
+        value={importStatementType}
+        onChange={(event) => setImportStatementType(event.target.value)}
+      >
+        <option value="CreditCard">Credit Card</option>
+        <option value="BankChecking">Bank / Checking</option>
+        <option value="Investment">Investment</option>
+      </select>
+    </label>
+
+    <label>
+      Statement File
+      <input
+        type="file"
+        accept=".csv"
+        onChange={(event) => {
+          setImportFile(event.target.files?.[0] ?? null);
+        }}
+      />
+    </label>
+
+    <button type="submit">Analyze</button>
+  </form>
+
+  {importError && <p className="error">{importError}</p>}
+
+  {importSummary && (
+    <div className="import-results">
+      <div className="import-summary-grid">
+        <div className="summary-card">
+          <span>Total Expenses</span>
+          <strong>${importSummary.totalExpenses}</strong>
+        </div>
+
+        <div className="summary-card">
+          <span>Payments / Refunds</span>
+          <strong>${importSummary.totalPaymentsOrRefunds}</strong>
+        </div>
+
+        <div className="summary-card">
+          <span>Net Activity</span>
+          <strong>${importSummary.netActivity}</strong>
+        </div>
+
+        <div className="summary-card">
+          <span>Imported Rows</span>
+          <strong>{importSummary.transactionCount}</strong>
+        </div>
+      </div>
+
+      <h3>Category Totals</h3>
+
+      <div className="category-total-table">
+        {importSummary.categoryTotals.map((categoryTotal) => (
+          <div className="category-total-row" key={categoryTotal.category}>
+            <span>{categoryTotal.category}</span>
+            <strong>${categoryTotal.total}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  )}
+</section>
 
         {transactions.length > 0 && (
           <section className="transactions-section">
