@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { isAxiosError } from "axios";
 import { api } from "./services/api";
 import "./App.css";
 
@@ -25,12 +26,19 @@ type ImportPreviewTransaction = {
   appCategory: string;
 };
 
+const formatCurrency = (amount: number) =>
+  new Intl.NumberFormat("en-CA", {
+    style: "currency",
+    currency: "CAD",
+  }).format(amount);
+
 function App() {
   const [importStatementType, setImportStatementType] = useState("CreditCard");
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState("");
   const [importPreview, setImportPreview] = useState<ImportPreviewTransaction[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const handleImportSummary = async (event: FormEvent) => {
     event.preventDefault();
@@ -39,7 +47,7 @@ function App() {
     setImportPreview([]);
 
     if (!importFile) {
-      setImportError("Please select a CSV file.");
+      setImportError("Please select a CSV or PDF file.");
       return;
     }
 
@@ -48,6 +56,8 @@ function App() {
     formData.append("file", importFile);
 
     try {
+      setIsAnalyzing(true);
+
       const summaryResponse = await api.post<ImportSummary>(
         "/api/imports/statement/summary",
         formData,
@@ -70,16 +80,28 @@ function App() {
 
       setImportSummary(summaryResponse.data);
       setImportPreview(previewResponse.data);
-    } catch {
+    } catch (error) {
+      if (isAxiosError(error) && typeof error.response?.data === "string") {
+        setImportError(error.response.data);
+        return;
+      }
+
       setImportError("Unable to analyze statement.");
+    } finally {
+      setIsAnalyzing(false);
     }
   };
+
+  const netActivityClassName =
+    importSummary && importSummary.netActivity >= 0
+      ? "amount-positive"
+      : "amount-negative";
 
   return (
     <main className="app">
       <section className="dashboard">
         <h1>Statement Analyzer</h1>
-        <p>Upload a CSV statement to preview transactions and spending by category.</p>
+        <p>Upload a CSV or PDF statement to preview transactions and spending by category.</p>
 
         <section className="import-section">
           <h2>Analyze Statement</h2>
@@ -89,6 +111,7 @@ function App() {
               Statement Type
               <select
                 value={importStatementType}
+                disabled={isAnalyzing}
                 onChange={(event) => setImportStatementType(event.target.value)}
               >
                 <option value="CreditCard">Credit Card</option>
@@ -101,15 +124,22 @@ function App() {
               Statement File
               <input
                 type="file"
-                accept=".csv"
+                accept=".csv,.pdf"
+                disabled={isAnalyzing}
                 onChange={(event) => {
                   setImportFile(event.target.files?.[0] ?? null);
                 }}
               />
             </label>
 
-            <button type="submit">Analyze</button>
+            <button type="submit" disabled={isAnalyzing}>
+              {isAnalyzing ? "Analyzing..." : "Analyze"}
+            </button>
           </form>
+
+          <p className="import-note">
+            CSV analysis is available now. PDF uploads are detected and will be parsed in the next PDF story.
+          </p>
 
           {importError && <p className="error">{importError}</p>}
 
@@ -118,17 +148,19 @@ function App() {
               <div className="import-summary-grid">
                 <div className="summary-card">
                   <span>Total Expenses</span>
-                  <strong>${importSummary.totalExpenses}</strong>
+                  <strong>{formatCurrency(importSummary.totalExpenses)}</strong>
                 </div>
 
                 <div className="summary-card">
                   <span>Payments / Refunds</span>
-                  <strong>${importSummary.totalPaymentsOrRefunds}</strong>
+                  <strong>{formatCurrency(importSummary.totalPaymentsOrRefunds)}</strong>
                 </div>
 
                 <div className="summary-card">
                   <span>Net Activity</span>
-                  <strong>${importSummary.netActivity}</strong>
+                  <strong className={netActivityClassName}>
+                    {formatCurrency(importSummary.netActivity)}
+                  </strong>
                 </div>
 
                 <div className="summary-card">
@@ -143,7 +175,7 @@ function App() {
                 {importSummary.categoryTotals.map((categoryTotal) => (
                   <div className="category-total-row" key={categoryTotal.category}>
                     <span>{categoryTotal.category}</span>
-                    <strong>${categoryTotal.total}</strong>
+                    <strong>{formatCurrency(categoryTotal.total)}</strong>
                   </div>
                 ))}
               </div>
@@ -172,7 +204,7 @@ function App() {
                         <span>{transaction.sourceCategory ?? "-"}</span>
                         <span>{transaction.appCategory}</span>
                         <span>{transaction.transactionGroup}</span>
-                        <span>${transaction.rawAmount}</span>
+                        <span>{formatCurrency(transaction.rawAmount)}</span>
                       </div>
                     ))}
                   </div>
