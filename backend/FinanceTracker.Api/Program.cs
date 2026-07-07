@@ -182,6 +182,34 @@ app.MapGet("/api/reports/summary", async (AppDbContext dbContext) =>
 })
 .WithName("GetSummaryReport");
 
+app.MapPost("/api/imports/statement/pdf/preview", async (HttpRequest request) =>
+{
+    if (!request.HasFormContentType)
+    {
+        return Results.BadRequest("Expected multipart form data.");
+    }
+
+    var form = await request.ReadFormAsync();
+    var file = form.Files["file"];
+
+    if (file is null || file.Length == 0)
+    {
+        return Results.BadRequest("PDF statement file is required.");
+    }
+
+    var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+
+    if (extension != ".pdf")
+    {
+        return Results.BadRequest("Please upload a PDF statement file.");
+    }
+
+    return Results.BadRequest("PDF preview parsing is not implemented yet.");
+})
+.WithName("PreviewPdfStatementImport")
+.DisableAntiforgery()
+.ExcludeFromDescription();
+
 app.MapPost("/api/imports/statement/preview", async (HttpRequest request) =>
 {
     if (!request.HasFormContentType)
@@ -210,6 +238,8 @@ app.MapPost("/api/imports/statement/preview", async (HttpRequest request) =>
     {
         return fileValidationResult;
     }
+
+    var statementFile = file!;
 
     var previewTransactions = new List<ImportPreviewTransaction>();
 
@@ -334,6 +364,34 @@ var appCategory =
 .DisableAntiforgery()
 .ExcludeFromDescription();
 
+app.MapPost("/api/imports/statement/pdf/summary", async (HttpRequest request) =>
+{
+    if (!request.HasFormContentType)
+    {
+        return Results.BadRequest("Expected multipart form data.");
+    }
+
+    var form = await request.ReadFormAsync();
+    var file = form.Files["file"];
+
+    if (file is null || file.Length == 0)
+    {
+        return Results.BadRequest("PDF statement file is required.");
+    }
+
+    var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+
+    if (extension != ".pdf")
+    {
+        return Results.BadRequest("Please upload a PDF statement file.");
+    }
+
+    return Results.BadRequest("PDF summary parsing is not implemented yet.");
+})
+.WithName("SummarizePdfStatementImport")
+.DisableAntiforgery()
+.ExcludeFromDescription();
+
 app.MapPost("/api/imports/statement/summary", async (HttpRequest request) =>
 {
     if (!request.HasFormContentType)
@@ -361,6 +419,7 @@ app.MapPost("/api/imports/statement/summary", async (HttpRequest request) =>
     {
         return fileValidationResult;
     }
+    var statementFile = file!;
 
     var previewTransactions = new List<ImportPreviewTransaction>();
 
