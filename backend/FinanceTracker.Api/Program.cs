@@ -204,9 +204,11 @@ app.MapPost("/api/imports/statement/preview", async (HttpRequest request) =>
         return Results.BadRequest("Invalid statement type.");
     }
 
-    if (file is null || file.Length == 0)
+    var fileValidationResult = ValidateStatementFile(file);
+
+    if (fileValidationResult is not null)
     {
-        return Results.BadRequest("CSV file is required.");
+        return fileValidationResult;
     }
 
     var previewTransactions = new List<ImportPreviewTransaction>();
@@ -353,9 +355,11 @@ app.MapPost("/api/imports/statement/summary", async (HttpRequest request) =>
         return Results.BadRequest("Invalid statement type.");
     }
 
-    if (file is null || file.Length == 0)
+    var fileValidationResult = ValidateStatementFile(file);
+
+    if (fileValidationResult is not null)
     {
-        return Results.BadRequest("CSV file is required.");
+        return fileValidationResult;
     }
 
     var previewTransactions = new List<ImportPreviewTransaction>();
@@ -505,3 +509,25 @@ app.MapPost("/api/imports/statement/summary", async (HttpRequest request) =>
 .ExcludeFromDescription();
 
 app.Run();
+
+static IResult? ValidateStatementFile(IFormFile? file)
+{
+    if (file is null || file.Length == 0)
+    {
+        return Results.BadRequest("Statement file is required.");
+    }
+
+    var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+
+    if (extension == ".pdf")
+    {
+        return Results.BadRequest("PDF statement import is detected but not supported yet. Please upload a CSV file until PDF parsing is added.");
+    }
+
+    if (extension != ".csv")
+    {
+        return Results.BadRequest("Unsupported statement file type. Please upload a CSV or PDF file.");
+    }
+
+    return null;
+}
