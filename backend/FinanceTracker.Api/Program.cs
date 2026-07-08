@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using FinanceTracker.Api.Modules.Imports;
 using System.Globalization;
 using Microsoft.AspNetCore.Mvc;
+using UglyToad.PdfPig;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -204,7 +205,30 @@ app.MapPost("/api/imports/statement/pdf/preview", async (HttpRequest request) =>
         return Results.BadRequest("Please upload a PDF statement file.");
     }
 
-    return Results.BadRequest("PDF preview parsing is not implemented yet.");
+    using var memoryStream = new MemoryStream();
+    await file.CopyToAsync(memoryStream);
+    memoryStream.Position = 0;
+
+    var pageTexts = new List<object>();
+
+    using (var document = PdfDocument.Open(memoryStream))
+    {
+        foreach (var page in document.GetPages())
+    {
+            pageTexts.Add(new
+        {
+            pageNumber = page.Number,
+            text = page.Text
+        });
+    }
+}
+
+return Results.Ok(new
+{
+    fileName = file.FileName,
+    pageCount = pageTexts.Count,
+    pages = pageTexts
+});
 })
 .WithName("PreviewPdfStatementImport")
 .DisableAntiforgery()
@@ -243,7 +267,7 @@ app.MapPost("/api/imports/statement/preview", async (HttpRequest request) =>
 
     var previewTransactions = new List<ImportPreviewTransaction>();
 
-    using var stream = file.OpenReadStream();
+    using var stream = statementFile.OpenReadStream();
     using var reader = new StreamReader(stream);
 
     var headerLine = await reader.ReadLineAsync();
@@ -422,8 +446,8 @@ app.MapPost("/api/imports/statement/summary", async (HttpRequest request) =>
     var statementFile = file!;
 
     var previewTransactions = new List<ImportPreviewTransaction>();
+    using var stream = statementFile.OpenReadStream();  
 
-    using var stream = file.OpenReadStream();
     using var reader = new StreamReader(stream);
 
     var headerLine = await reader.ReadLineAsync();
