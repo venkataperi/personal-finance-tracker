@@ -32,6 +32,9 @@ const formatCurrency = (amount: number) =>
     currency: "CAD",
   }).format(amount);
 
+const getFileExtension = (fileName: string) =>
+  fileName.slice(fileName.lastIndexOf(".")).toLowerCase();
+
 function App() {
   const [importStatementType, setImportStatementType] = useState("CreditCard");
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -51,6 +54,23 @@ function App() {
       return;
     }
 
+    const fileExtension = getFileExtension(importFile.name);
+
+    if (fileExtension !== ".csv" && fileExtension !== ".pdf") {
+      setImportError("Please select a supported CSV or PDF statement file.");
+      return;
+    }
+
+    const summaryEndpoint =
+      fileExtension === ".pdf"
+        ? "/api/imports/statement/pdf/summary"
+        : "/api/imports/statement/summary";
+
+    const previewEndpoint =
+      fileExtension === ".pdf"
+        ? "/api/imports/statement/pdf/preview"
+        : "/api/imports/statement/preview";
+
     const formData = new FormData();
     formData.append("statementType", importStatementType);
     formData.append("file", importFile);
@@ -59,7 +79,7 @@ function App() {
       setIsAnalyzing(true);
 
       const summaryResponse = await api.post<ImportSummary>(
-        "/api/imports/statement/summary",
+        summaryEndpoint,
         formData,
         {
           headers: {
@@ -69,7 +89,7 @@ function App() {
       );
 
       const previewResponse = await api.post<ImportPreviewTransaction[]>(
-        "/api/imports/statement/preview",
+        previewEndpoint,
         formData,
         {
           headers: {
@@ -81,9 +101,23 @@ function App() {
       setImportSummary(summaryResponse.data);
       setImportPreview(previewResponse.data);
     } catch (error) {
-      if (isAxiosError(error) && typeof error.response?.data === "string") {
-        setImportError(error.response.data);
-        return;
+      if (isAxiosError(error)) {
+        const responseData = error.response?.data;
+
+        if (typeof responseData === "string" && responseData.trim()) {
+          setImportError(responseData);
+          return;
+        }
+
+        if (error.response?.status === 404) {
+          setImportError("PDF import endpoint was not found. Please make sure the backend is restarted and the PDF endpoints exist.");
+          return;
+        }
+
+        if (error.message) {
+          setImportError(error.message);
+          return;
+        }
       }
 
       setImportError("Unable to analyze statement.");
