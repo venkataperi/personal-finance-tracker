@@ -4,8 +4,10 @@ using FinanceTracker.Api.Shared.Database;
 using Microsoft.EntityFrameworkCore;
 using FinanceTracker.Api.Modules.Imports;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using UglyToad.PdfPig;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -209,30 +211,26 @@ app.MapPost("/api/imports/statement/pdf/preview", async (HttpRequest request) =>
     await file.CopyToAsync(memoryStream);
     memoryStream.Position = 0;
 
-    var pageTexts = new List<object>();
+    var extractedTextParts = new List<string>();
 
     using (var document = PdfDocument.Open(memoryStream))
     {
         foreach (var page in document.GetPages())
-    {
-            pageTexts.Add(new
         {
-            pageNumber = page.Number,
-            text = page.Text
-        });
+            extractedTextParts.Add(page.Text);
+        }
     }
-}
 
-return Results.Ok(new
-{
-    fileName = file.FileName,
-    pageCount = pageTexts.Count,
-    pages = pageTexts
-});
+    var combinedText = string.Join(Environment.NewLine, extractedTextParts);
+
+    var previewTransactions = ParsePdfTransactions(combinedText, StatementType.CreditCard);
+
+    return Results.Ok(previewTransactions);
 })
 .WithName("PreviewPdfStatementImport")
 .DisableAntiforgery()
 .ExcludeFromDescription();
+
 
 app.MapPost("/api/imports/statement/preview", async (HttpRequest request) =>
 {
@@ -410,7 +408,51 @@ app.MapPost("/api/imports/statement/pdf/summary", async (HttpRequest request) =>
         return Results.BadRequest("Please upload a PDF statement file.");
     }
 
-    return Results.BadRequest("PDF summary parsing is not implemented yet.");
+    using var memoryStream = new MemoryStream();
+await file.CopyToAsync(memoryStream);
+memoryStream.Position = 0;
+
+var extractedTextParts = new List<string>();
+
+using (var document = PdfDocument.Open(memoryStream))
+{
+    foreach (var page in document.GetPages())
+    {
+        extractedTextParts.Add(page.Text);
+    }
+}
+
+var combinedText = string.Join(Environment.NewLine, extractedTextParts);
+
+var previewTransactions = ParsePdfTransactions(combinedText, StatementType.CreditCard);
+
+var totalExpenses = previewTransactions
+    .Where(transaction => transaction.TransactionGroup == "Expense")
+    .Sum(transaction => transaction.RawAmount);
+
+var totalPaymentsOrRefunds = previewTransactions
+    .Where(transaction => transaction.TransactionGroup == "PaymentOrRefund")
+    .Sum(transaction => transaction.RawAmount);
+
+var categoryTotals = previewTransactions
+    .Where(transaction => transaction.TransactionGroup == "Expense")
+    .GroupBy(transaction => transaction.AppCategory)
+    .Select(group => new ImportCategoryTotal
+    {
+        Category = group.Key,
+        Total = group.Sum(transaction => transaction.RawAmount)
+    })
+    .OrderByDescending(categoryTotal => categoryTotal.Total)
+    .ToList();
+
+return Results.Ok(new ImportSummaryResponse
+{
+    TotalExpenses = totalExpenses,
+    TotalPaymentsOrRefunds = totalPaymentsOrRefunds,
+    NetActivity = totalPaymentsOrRefunds - totalExpenses,
+    TransactionCount = previewTransactions.Count,
+    CategoryTotals = categoryTotals
+});
 })
 .WithName("SummarizePdfStatementImport")
 .DisableAntiforgery()
@@ -613,4 +655,148 @@ static IResult? ValidateStatementFile(IFormFile? file)
     }
 
     return null;
+}
+
+static List<ImportPreviewTransaction> ParsePdfTransactions(string pdfText, StatementType statementType)
+{
+    var transactions = new List<ImportPreviewTransaction>();
+
+    var pattern =
+        @"(?<date>\d{4}-\d{2}-\d{2})" +
+        @"(?<card>\*{12}\d{4})" +
+        @"(?<rest>.*?)(?=\d{4}-\d{2}-\d{2}\*{12}\d{4}|$)";
+
+    var matches = Regex.Matches(pdfText, pattern, RegexOptions.Singleline);
+
+    foreach (Match match in matches)
+    {
+        var dateText = match.Groups["date"].Value;
+        var rest = match.Groups["rest"].Value;
+
+        if (!DateOnly.TryParse(dateText, out var transactionDate))
+        {
+            continue;
+        }
+
+        var amountMatch = Regex.Match(
+            rest,
+                @"(?<amount>\d+\.\d{1,2})(?<trailingZero>0|01)?$");
+
+        if (!amountMatch.Success)
+        {
+            continue;
+        }
+
+        var amountText = amountMatch.Groups["amount"].Value;
+        var descriptionAndCategory = rest[..amountMatch.Index];
+
+        var isPaymentOrRefund =
+        descriptionAndCategory.Contains("Payment received", StringComparison.OrdinalIgnoreCase) ||
+        descriptionAndCategory.Contains("Credit card payment", StringComparison.OrdinalIgnoreCase);
+
+        decimal.TryParse(
+        amountText,
+        NumberStyles.Number,
+        CultureInfo.InvariantCulture,
+        out var rawAmount);
+
+        if (rawAmount <= 0)
+        {
+            continue;
+        }
+
+        var isCreditAmount = isPaymentOrRefund;
+
+        var knownCategories = new[]
+        {
+            "Car rentals & taxis",
+            "Gifts and donations",
+            "Credit card payment",
+            "Electronics and software",
+            "Alcohol/bars",
+            "Restaurants",
+            "Internet",
+            "Shopping"
+        };
+
+        var sourceCategory = "Unknown";
+        var description = descriptionAndCategory;
+
+        foreach (var knownCategory in knownCategories)
+        {
+            var categoryIndex = descriptionAndCategory.LastIndexOf(
+                knownCategory,
+                StringComparison.OrdinalIgnoreCase);
+
+            if (categoryIndex >= 0)
+            {
+                description = descriptionAndCategory[..categoryIndex];
+                sourceCategory = descriptionAndCategory[categoryIndex..];
+                break;
+            }
+        }
+
+        description = description.Trim();
+        sourceCategory = sourceCategory.Trim();
+
+        var transactionGroup = statementType == StatementType.CreditCard
+            ? isCreditAmount ? "PaymentOrRefund" : "Expense"
+            : "Unclassified";
+
+        var appCategory = CategorizeTransaction(description, sourceCategory);
+
+        transactions.Add(new ImportPreviewTransaction
+        {
+            TransactionDate = transactionDate,
+            Description = description,
+            SourceCategory = sourceCategory,
+            RawAmount = rawAmount,
+            TransactionGroup = transactionGroup,
+            AppCategory = appCategory
+        });
+    }
+
+    return transactions;
+}
+
+static string CategorizeTransaction(string description, string sourceCategory)
+{
+    var descriptionLower = description.ToLowerInvariant();
+    var sourceCategoryLower = sourceCategory.ToLowerInvariant();
+
+    return
+        sourceCategoryLower.Contains("credit card payment") ||
+        descriptionLower.Contains("payment received")
+            ? "Credit Card Payment"
+        : sourceCategoryLower.Contains("fees") ||
+          descriptionLower.Contains("interest")
+            ? "Fees / Interest"
+        : descriptionLower.Contains("costco") ||
+          descriptionLower.Contains("supermarket") ||
+          sourceCategoryLower.Contains("grocery")
+            ? "Groceries"
+        : sourceCategoryLower.Contains("restaurant")
+            ? "Restaurants / Coffee"
+        : sourceCategoryLower.Contains("car rental") ||
+          sourceCategoryLower.Contains("taxi") ||
+          descriptionLower.Contains("uber")
+            ? "Transportation"
+        : sourceCategoryLower.Contains("internet") ||
+          sourceCategoryLower.Contains("cable")
+            ? "Phone / Internet"
+        : sourceCategoryLower.Contains("electronics") ||
+          descriptionLower.Contains("openai")
+            ? "Software / Subscriptions"
+        : sourceCategoryLower.Contains("gift") ||
+          sourceCategoryLower.Contains("donation")
+            ? "Gifts / Donations"
+        : sourceCategoryLower.Contains("alcohol") ||
+          sourceCategoryLower.Contains("bar")
+            ? "Entertainment"
+        : sourceCategoryLower.Contains("insurance") ||
+          sourceCategoryLower.Contains("finance")
+            ? "Insurance / Financial"
+        : sourceCategoryLower.Contains("shopping")
+            ? "Shopping"
+        : "Miscellaneous";
 }
