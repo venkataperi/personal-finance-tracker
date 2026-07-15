@@ -186,6 +186,64 @@ app.MapGet("/api/reports/summary", async (AppDbContext dbContext) =>
 })
 .WithName("GetSummaryReport");
 
+app.MapPost("/api/imports/statements/compare", async (HttpRequest request) =>
+{
+    if (!request.HasFormContentType)
+    {
+        return Results.BadRequest("Expected multipart form data.");
+    }
+
+    var form = await request.ReadFormAsync();
+    var files = form.Files;
+    var statementTypeText = form["statementType"].ToString();
+
+    if (files.Count == 0)
+    {
+        return Results.BadRequest("Upload at least one statement file.");
+    }
+
+    if (files.Count > 5)
+    {
+        return Results.BadRequest("You can upload up to 5 statement files at a time.");
+    }
+
+    var parsedStatementType = StatementType.CreditCard;
+    if (!string.IsNullOrWhiteSpace(statementTypeText) &&
+        !Enum.TryParse<StatementType>(statementTypeText, true, out parsedStatementType))
+    {
+        return Results.BadRequest("Invalid statement type.");
+    }
+
+    var analyses = new List<StatementAnalysisResponse>();
+
+    foreach (var file in files)
+    {
+        if (file.Length == 0)
+        {
+            continue;
+        }
+
+        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (extension != ".csv" && extension != ".pdf")
+        {
+            analyses.Add(new StatementAnalysisResponse
+            {
+                FileName = file.FileName,
+                AccountName = Path.GetFileNameWithoutExtension(file.FileName),
+                Notes = [$"Unsupported file type '{extension}'. Only CSV and PDF are supported in this MVP."]
+            });
+            continue;
+        }
+
+        analyses.Add(await StatementAnalysisService.AnalyzeUploadedStatementAsync(file, parsedStatementType));
+    }
+
+    return Results.Ok(StatementAnalysisService.BuildComparison(analyses));
+})
+.WithName("CompareUploadedStatements")
+.DisableAntiforgery()
+.ExcludeFromDescription();
+
 app.MapPost("/api/imports/statement/pdf/preview", async (HttpRequest request) =>
 {
     if (!request.HasFormContentType)
@@ -194,7 +252,18 @@ app.MapPost("/api/imports/statement/pdf/preview", async (HttpRequest request) =>
     }
 
     var form = await request.ReadFormAsync();
+    var statementType = form["statementType"].ToString();
     var file = form.Files["file"];
+
+    if (string.IsNullOrWhiteSpace(statementType))
+    {
+        return Results.BadRequest("Statement type is required.");
+    }
+
+    if (!Enum.TryParse<StatementType>(statementType, true, out var parsedStatementType))
+    {
+        return Results.BadRequest("Invalid statement type.");
+    }
 
     if (file is null || file.Length == 0)
     {
@@ -224,7 +293,9 @@ app.MapPost("/api/imports/statement/pdf/preview", async (HttpRequest request) =>
 
     var combinedText = string.Join(Environment.NewLine, extractedTextParts);
 
-    var previewTransactions = ParsePdfTransactions(combinedText, StatementType.CreditCard);
+    var previewTransactions = PdfStatementParser.ParsePdfTransactions(
+        combinedText,
+        parsedStatementType);
 
     return Results.Ok(previewTransactions);
 })
@@ -425,7 +496,9 @@ using (var document = PdfDocument.Open(memoryStream))
 
 var combinedText = string.Join(Environment.NewLine, extractedTextParts);
 
-var previewTransactions = ParsePdfTransactions(combinedText, StatementType.CreditCard);
+var previewTransactions = PdfStatementParser.ParsePdfTransactions(
+    combinedText,
+    StatementType.CreditCard);
 
 var totalExpenses = previewTransactions
     .Where(transaction => transaction.TransactionGroup == "Expense")
@@ -656,106 +729,4 @@ static IResult? ValidateStatementFile(IFormFile? file)
     }
 
     return null;
-}
-
-static List<ImportPreviewTransaction> ParsePdfTransactions(string pdfText, StatementType statementType)
-{
-    var transactions = new List<ImportPreviewTransaction>();
-
-    var pattern =
-        @"(?<date>\d{4}-\d{2}-\d{2})" +
-        @"(?<card>\*{12}\d{4})" +
-        @"(?<rest>.*?)(?=\d{4}-\d{2}-\d{2}\*{12}\d{4}|$)";
-
-    var matches = Regex.Matches(pdfText, pattern, RegexOptions.Singleline);
-
-    foreach (Match match in matches)
-    {
-        var dateText = match.Groups["date"].Value;
-        var rest = match.Groups["rest"].Value;
-
-        if (!DateOnly.TryParse(dateText, out var transactionDate))
-        {
-            continue;
-        }
-
-        var amountMatch = Regex.Match(
-            rest,
-                @"(?<amount>\d+\.\d{1,2})(?<trailingZero>0|01)?$");
-
-        if (!amountMatch.Success)
-        {
-            continue;
-        }
-
-        var amountText = amountMatch.Groups["amount"].Value;
-        var descriptionAndCategory = rest[..amountMatch.Index];
-
-        var isPaymentOrRefund =
-        descriptionAndCategory.Contains("Payment received", StringComparison.OrdinalIgnoreCase) ||
-        descriptionAndCategory.Contains("Credit card payment", StringComparison.OrdinalIgnoreCase);
-
-        decimal.TryParse(
-        amountText,
-        NumberStyles.Number,
-        CultureInfo.InvariantCulture,
-        out var rawAmount);
-
-        if (rawAmount <= 0)
-        {
-            continue;
-        }
-
-        var isCreditAmount = isPaymentOrRefund;
-
-        var knownCategories = new[]
-        {
-            "Car rentals & taxis",
-            "Gifts and donations",
-            "Credit card payment",
-            "Electronics and software",
-            "Alcohol/bars",
-            "Restaurants",
-            "Internet",
-            "Shopping"
-        };
-
-        var sourceCategory = "Unknown";
-        var description = descriptionAndCategory;
-
-        foreach (var knownCategory in knownCategories)
-        {
-            var categoryIndex = descriptionAndCategory.LastIndexOf(
-                knownCategory,
-                StringComparison.OrdinalIgnoreCase);
-
-            if (categoryIndex >= 0)
-            {
-                description = descriptionAndCategory[..categoryIndex];
-                sourceCategory = descriptionAndCategory[categoryIndex..];
-                break;
-            }
-        }
-
-        description = description.Trim();
-        sourceCategory = sourceCategory.Trim();
-
-        var transactionGroup = statementType == StatementType.CreditCard
-            ? isCreditAmount ? "PaymentOrRefund" : "Expense"
-            : "Unclassified";
-
-        var appCategory = StatementCategorizer.CategorizeTransaction(description, sourceCategory);
-
-        transactions.Add(new ImportPreviewTransaction
-        {
-            TransactionDate = transactionDate,
-            Description = description,
-            SourceCategory = sourceCategory,
-            RawAmount = rawAmount,
-            TransactionGroup = transactionGroup,
-            AppCategory = appCategory
-        });
-    }
-
-    return transactions;
 }
